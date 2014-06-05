@@ -36,6 +36,7 @@
         'security/groups.xml',
         #'security/ir.model.access.csv',
         'oerpfs_view.xml',
+        'wizard/mount_view.xml',
     ],
     'demo_xml': [],
     'test': [],

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openerp>
+    <data>
+        ##############################################################################
+        #
+        #    oerpfs module for OpenERP, Automatic mounts with fuse on the filesystem for simple operations (files access, data import, etc.)
+        #    Copyright (C) 2014 SYLEAM Info Services ([http://www.Syleam.fr/])
+        #              Sylvain Garancher [sylvain.garancher@syleam.fr]
+        #
+        #    This file is a part of oerpfs
+        #
+        #    oerpfs is free software: you can redistribute it and/or modify
+        #    it under the terms of the GNU Affero General Public License as published by
+        #    the Free Software Foundation, either version 3 of the License, or
+        #    (at your option) any later version.
+        #
+        #    oerpfs is distributed in the hope that it will be useful,
+        #    but WITHOUT ANY WARRANTY; without even the implied warranty of
+        #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+        #    GNU Affero General Public License for more details.
+        #
+        #    You should have received a copy of the GNU Affero General Public License
+        #    along with this program.  If not, see [http://www.gnu.org/licenses/].
+        #
+        ##############################################################################
+
+        <record id="view_wizard_oerpfs_mount_form" model="ir.ui.view">
+            <field name="name">wizard.oerpfs.mount.form</field>
+            <field name="model">wizard.oerpfs.mount</field>
+            <field name="priority" eval="8"/>
+            <field name="arch" type="xml">
+                <form string="Mount">
+                    <field name="directory_id"/>
+                    <field name="user_id"/>
+                    <button string="Mount directory" icon="gtk-ok" type="object" name="mount"/>
+                </form>
+            </field>
+        </record>
+        <record model="ir.actions.act_window" id="action_wizard_oerpfs_mount_view">
+            <field name="name">Mount</field>
+            <field name="type">ir.actions.act_window</field>
+            <field name="res_model">wizard.oerpfs.mount</field>
+            <field name="view_type">form</field>
+            <field name="view_mode">form</field>
+            <field name="domain">[]</field>
+            <field name="context">{}</field>
+            <field name="target">new</field>
+        </record>
+        <record model="ir.values" id="wizard_wizard_oerpfs_mount">
+            <field name="name">Mount</field>
+            <field name="object" eval="1"/>
+            <field name="key">action</field>
+            <field name="key2">client_action_multi</field>
+            <field name="model">oerpfs.directory</field>
+            <field name="value" eval="'ir.actions.act_window,' + str(ref('action_wizard_oerpfs_mount_view'))" />
+        </record>
+    </data>
+</openerp>
