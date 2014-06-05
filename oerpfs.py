@@ -50,12 +50,16 @@ class OerpFsDirectory(orm.Model):
         'type': 'attachment',
     }
 
+
 class OerpFSModel(fuse.Fuse):
     """
     Fuse filesystem for simple OpenERP filestore access
     """
     def __init__(self, uid, dbname, *args, **kwargs):
         super(OerpFSModel, self).__init__(*args, **kwargs)
+
+        # Dict used to store files contents
+        self.files = {}
 
         # Initialize OpenERP specific variables
         self.uid = uid
@@ -72,7 +76,7 @@ class OerpFSModel(fuse.Fuse):
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
         fakeStat = fuse.Stat()
-        fakeStat.st_mode = stat.S_IFDIR | 0400
+        fakeStat.st_mode = stat.S_IFDIR | 0600
         fakeStat.st_nlink = 0
 
         if path == '/':
@@ -107,19 +111,19 @@ class OerpFSModel(fuse.Fuse):
         # Chech for attachement existence
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
-        if not attachment_ids:
+        if not attachment_ids and not path in self.files:
             cr.close()
             return -ENOENT
 
         # Common stats
-        fakeStat.st_mode = stat.S_IFREG | 0400
+        fakeStat.st_mode = stat.S_IFREG | 0600
         fakeStat.st_nlink = 2
 
         # Read the file
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
         attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
-        fakeStat.st_size = len(base64.b64decode(attachment_data[0]['datas']))
+        fakeStat.st_size = attachment_data[0]['datas'] and len(base64.b64decode(attachment_data[0]['datas'])) or 0
         cr.close()
         return fakeStat
 
@@ -172,6 +176,78 @@ class OerpFSModel(fuse.Fuse):
         attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
         cr.close()
         return base64.b64decode(attachment_data[0]['datas'])[offset:offset + size]
+
+    def rename(self, old_path, new_path):
+        """
+        Rename a file, eventually moving it from a model to another one, if the parent directories have changed
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        old_paths = old_path.split('/')[1:]
+        new_paths = new_path.split('/')[1:]
+        attachment_obj = pool.get('ir.attachment')
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', old_paths[0]), ('res_id', '=', int(old_paths[1])), ('name', '=', old_paths[2])])
+        attachment_obj.write(cr, self.uid, attachment_ids, {'res_model': new_paths[0], 'res_id': new_paths[1], 'name': new_paths[2]})
+        cr.commit()
+        cr.close()
+
+    def open(self, path, flags):
+        self.files[path] = StringIO()
+
+    def create(self, path, mode, fi=None):
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        self.files[path] = StringIO()
+        paths = path.split('/')[1:]
+        attachment_obj = pool.get('ir.attachment')
+        attachment_obj.create(cr, self.uid, {'type': 'binary', 'res_model': paths[0], 'res_id': paths[1], 'name': paths[2]})
+        cr.commit()
+        cr.close()
+        return 0
+
+    def write(self, path, buf, offset):
+        """
+        Write the contents of a new file
+        """
+        if not path in self.files:
+            return -ENOENT
+        self.files[path].write(buf)
+        return len(buf)
+
+    def flush(self, path):
+        """
+        Write the contents into OpenERP
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        # FIXME : Don't know why it doesn't work without rebuilding the StringIO object...
+        value = StringIO(self.files[path].getvalue())
+
+        paths = path.split('/')[1:]
+        attachment_obj = pool.get('ir.attachment')
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
+        attachment_obj.write(cr, self.uid, attachment_ids, {'type': 'binary', 'datas': base64.b64encode(value.getvalue()), 'res_model': paths[0], 'res_id': paths[1], 'name': paths[2]})
+        value.close()
+        del value
+        cr.commit()
+        cr.close()
+
+    def truncate(self, path, length):
+        return 0
+
+    def chmod(self, path):
+        return 0
+
+    def chown(self, path):
+        return 0
+
+    def utime(self, path, times=None):
+        return 0
+
+    def release(self, path, fh):
+        # Close StringIO and free memory
+        self.files[path].close()
+        del self.files[path]
 
 
 class OerpFSCsvImport(fuse.Fuse):
