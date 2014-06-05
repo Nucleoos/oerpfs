@@ -22,6 +22,7 @@
 #
 ##############################################################################
 
+import os
 import multiprocessing
 from openerp.osv import orm
 from openerp.osv import fields
@@ -45,6 +46,12 @@ class OerpfsMount(orm.TransientModel):
         """
         Mount a directory for the choosen user
         """
+        def launch(mount_point):
+            os.setsid()
+            # FIXME : Better manage multi processing
+            os.closerange(3, os.sysconf("SC_OPEN_MAX"))
+            mount_point.main()
+
         for wizard in self.browse(cr, uid, ids, context=context):
             fuseClass = None
             if wizard.directory_id.type == 'attachment':
@@ -63,7 +70,9 @@ class OerpfsMount(orm.TransientModel):
             mount_point.fuse_args.mountpoint = str(wizard.directory_id.path)
             mount_point.multithreaded = True
             mount_point.parse(mount_options)
-            mount_process = multiprocessing.Process(target=mount_point.main)
+            mount_process = multiprocessing.Process(target=launch, args=(mount_point,))
             mount_process.start()
+
+        return True
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
