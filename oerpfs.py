@@ -249,6 +249,19 @@ class OerpFSModel(fuse.Fuse):
         self.files[path].close()
         del self.files[path]
 
+    def unlink(self, path):
+        """
+        Delete a file
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        paths = path.split('/')[1:]
+        attachment_obj = pool.get('ir.attachment')
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
+        attachment_obj.unlink(cr, self.uid, attachment_ids)
+        cr.commit()
+        cr.close()
+
 
 class OerpFSCsvImport(fuse.Fuse):
     """
