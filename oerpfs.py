@@ -106,7 +106,7 @@ class OerpFSModel(fuse.Fuse):
 
         # Chech for attachement existence
         attachment_obj = pool.get('ir.attachment')
-        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('id', '=', self.id_from_label(paths[2]))])
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
         if not attachment_ids:
             cr.close()
             return -ENOENT
@@ -117,7 +117,7 @@ class OerpFSModel(fuse.Fuse):
 
         # Read the file
         attachment_obj = pool.get('ir.attachment')
-        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('id', '=', self.id_from_label(paths[2]))])
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
         attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
         fakeStat.st_size = len(base64.b64decode(attachment_data[0]['datas']))
         cr.close()
@@ -154,7 +154,7 @@ class OerpFSModel(fuse.Fuse):
             attachment_obj = pool.get('ir.attachment')
             attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1]))])
             for attachment_data in attachment_obj.read(cr, self.uid, attachment_ids, ['name']):
-                yield fuse.Direntry(str('%d-%s' % (attachment_data['id'], attachment_data['name'])))
+                yield fuse.Direntry(str(attachment_data['name']))
 
         cr.close()
 
@@ -168,16 +168,10 @@ class OerpFSModel(fuse.Fuse):
         paths = path.split('/')[1:]
         # Read files by slides
         attachment_obj = pool.get('ir.attachment')
-        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('id', '=', self.id_from_label(paths[2]))])
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
         attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
         cr.close()
         return base64.b64decode(attachment_data[0]['datas'])[offset:offset + size]
-
-    def id_from_label(self, label):
-        """
-        Return the attachment ID from a file name : only the part before the first '-'
-        """
-        return int(label.split('-')[0])
 
 
 class OerpFSCsvImport(fuse.Fuse):
