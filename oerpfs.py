@@ -111,7 +111,7 @@ class OerpFSModel(fuse.Fuse):
         # Chech for attachement existence
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
-        if not attachment_ids and not path in self.files:
+        if not attachment_ids:
             cr.close()
             return -ENOENT
 
