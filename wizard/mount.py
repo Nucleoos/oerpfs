@@ -52,11 +52,17 @@ class OerpfsMount(orm.TransientModel):
             elif wizard.directory_id.type == 'csv_import':
                 fuseClass = OerpFSCsvImport
 
+            # Mount options
+            mount_options = [
+                '-o', 'fsname=oerpfs',
+                '-o', 'subtype=openerp.' + str(wizard.directory_id.name),
+            ]
+
             # Mount the directory using fuse
             mount_point = fuseClass(wizard.user_id.id, cr.dbname)
             mount_point.fuse_args.mountpoint = str(wizard.directory_id.path)
             mount_point.multithreaded = True
-            mount_point.parse([])
+            mount_point.parse(mount_options)
             mount_process = multiprocessing.Process(target=mount_point.main)
             mount_process.start()
 
