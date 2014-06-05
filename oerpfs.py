@@ -22,8 +22,15 @@
 #
 ##############################################################################
 
+import stat
+import fuse
+import base64
+from errno import ENOENT
+from openerp import pooler
 from openerp.osv import orm
 from openerp.osv import fields
+
+fuse.fuse_python_api = (0, 2)
 
 
 class OerpFsDirectory(orm.Model):
@@ -40,5 +47,134 @@ class OerpFsDirectory(orm.Model):
         'path': '/srv/openerp/fs/',
         'type': 'attachment',
     }
+
+class OerpFSModel(fuse.Fuse):
+    """
+    Fuse filesystem for simple OpenERP filestore access
+    """
+    def __init__(self, uid, dbname, *args, **kwargs):
+        super(OerpFSModel, self).__init__(*args, **kwargs)
+
+        # Initialize OpenERP specific variables
+        self.uid = uid
+        self.dbname = dbname
+
+    def getattr(self, path):
+        """
+        Return attributes for the specified path :
+            - Search for the model as first part
+            - Search for an existing record as second part
+            - Search for an existing attachment as third part
+            - There cannot be more than 3 parts in the path
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        fakeStat = fuse.Stat()
+        fakeStat.st_mode = stat.S_IFDIR | 0400
+        fakeStat.st_nlink = 0
+
+        if path == '/':
+            cr.close()
+            return fakeStat
+
+        paths = path.split('/')[1:]
+        if len(paths) > 3:
+            cr.close()
+            return -ENOENT
+
+        # Check for model existence
+        model_obj = pool.get('ir.model')
+        model_ids = model_obj.search(cr, self.uid, [('model', '=', paths[0])])
+        if not model_ids:
+            cr.close()
+            return -ENOENT
+        elif len(paths) == 1:
+            cr.close()
+            return fakeStat
+
+        # Check for record existence
+        element_obj = pool.get(paths[0])
+        element_ids = element_obj.search(cr, self.uid, [('id', '=', int(paths[1]))])
+        if not element_ids:
+            cr.close()
+            return -ENOENT
+        elif len(paths) == 2:
+            cr.close()
+            return fakeStat
+
+        # Chech for attachement existence
+        attachment_obj = pool.get('ir.attachment')
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('id', '=', self.id_from_label(paths[2]))])
+        if not attachment_ids:
+            cr.close()
+            return -ENOENT
+
+        # Common stats
+        fakeStat.st_mode = stat.S_IFREG | 0400
+        fakeStat.st_nlink = 2
+
+        # Read the file
+        attachment_obj = pool.get('ir.attachment')
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('id', '=', self.id_from_label(paths[2]))])
+        attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
+        fakeStat.st_size = len(base64.b64decode(attachment_data[0]['datas']))
+        cr.close()
+        return fakeStat
+
+    def readdir(self, path, offset):
+        """
+        Return content of a directory :
+            - List models for root path
+            - List records for a model
+            - List attachments for a record
+        We don't have to check for the path, because getattr already returns -ENOENT if the model/record/attachment doesn't exist
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        yield fuse.Direntry('.')
+        yield fuse.Direntry('..')
+
+        paths = path.split('/')[1:]
+        # List models
+        if path == '/':
+            model_obj = pool.get('ir.model')
+            model_ids = model_obj.search(cr, self.uid, [])
+            for model_data in model_obj.read(cr, self.uid, model_ids, ['model']):
+                yield fuse.Direntry(str(model_data['model']))
+        # List records
+        elif len(paths) == 1:
+            element_obj = pool.get(paths[0])
+            element_ids = element_obj.search(cr, self.uid, [])
+            for element_data in element_obj.read(cr, self.uid, element_ids, ['id']):
+                yield fuse.Direntry(str(element_data['id']))
+        # List attachments
+        else:
+            attachment_obj = pool.get('ir.attachment')
+            attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1]))])
+            for attachment_data in attachment_obj.read(cr, self.uid, attachment_ids, ['name']):
+                yield fuse.Direntry(str('%d-%s' % (attachment_data['id'], attachment_data['name'])))
+
+        cr.close()
+
+    def read(self, path, size, offset):
+        """
+        Return the specified slide of a file
+        Note : Only the beginning of the name is required (the ID of the attachment), we can put anything after the first '-', it will be ignored
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        paths = path.split('/')[1:]
+        # Read files by slides
+        attachment_obj = pool.get('ir.attachment')
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('id', '=', self.id_from_label(paths[2]))])
+        attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
+        cr.close()
+        return base64.b64decode(attachment_data[0]['datas'])[offset:offset + size]
+
+    def id_from_label(self, label):
+        """
+        Return the attachment ID from a file name : only the part before the first '-'
+        """
+        return int(label.split('-')[0])
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
