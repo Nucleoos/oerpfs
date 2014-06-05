@@ -25,7 +25,7 @@
 import multiprocessing
 from openerp.osv import orm
 from openerp.osv import fields
-from openerp.addons.oerpfs.oerpfs import OerpFSModel
+from openerp.addons.oerpfs.oerpfs import OerpFSModel, OerpFSCsvImport
 
 
 class OerpfsMount(orm.TransientModel):
@@ -49,6 +49,8 @@ class OerpfsMount(orm.TransientModel):
             fuseClass = None
             if wizard.directory_id.type == 'attachment':
                 fuseClass = OerpFSModel
+            elif wizard.directory_id.type == 'csv_import':
+                fuseClass = OerpFSCsvImport
 
             # Mount the directory using fuse
             mount_point = fuseClass(wizard.user_id.id, cr.dbname)
