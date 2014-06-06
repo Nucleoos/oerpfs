@@ -445,7 +445,13 @@ class OerpFSDocument(fuse.Fuse):
         cr.close()
 
     def read(self, path, size, offset):
-        return 0
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+
+        node = self._get_node(cr, path)
+        contents = node.get_data(cr)
+        cr.close()
+        return contents[offset:offset + size]
 
     def rename(self, old_path, new_path):
         return 0
