@@ -379,6 +379,17 @@ class OerpFSDocument(fuse.Fuse):
         self.uid = uid
         self.dbname = dbname
 
+    def _get_node(self, cr, path):
+        """
+        Return a node object corresponding to the supplied path
+        """
+        if path != '/':
+            path = '/' + path
+
+        # Check for node existence
+        node = get_node_context(cr, self.uid, {})
+        return node.get_uri(cr, path.split('/')[1:])
+
     def getattr(self, path):
         """
         Return attributes for the specified path :
@@ -389,13 +400,7 @@ class OerpFSDocument(fuse.Fuse):
         """
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
-
-        if path != '/':
-            path = '/' + path
-
-        # Check for node existence
-        node = get_node_context(cr, self.uid, {})
-        node = node.get_uri(cr, path.split('/')[1:])
+        node = self._get_node(cr, path)
         if not node:
             cr.close()
             return -ENOENT
@@ -433,11 +438,7 @@ class OerpFSDocument(fuse.Fuse):
         yield fuse.Direntry('.')
         yield fuse.Direntry('..')
 
-        if path != '/':
-            path = '/' + path
-
-        node = get_node_context(cr, self.uid, {})
-        node = node.get_uri(cr, path.split('/')[1:])
+        node = self._get_node(cr, path)
         for child in node.children(cr):
             yield fuse.Direntry(str(child.displayname))
 
