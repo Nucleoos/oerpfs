@@ -454,7 +454,14 @@ class OerpFSDocument(fuse.Fuse):
         return contents[offset:offset + size]
 
     def rename(self, old_path, new_path):
-        return 0
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+
+        node = self._get_node(cr, old_path)
+        new_dir_node = self._get_node(cr, '/'.join(new_path.split('/')[:-1]))
+        node.move_to(cr, new_dir_node, new_name=new_path.split('/')[-1])
+        cr.commit()
+        cr.close()
 
     def open(self, path, flags):
         self.files[path] = StringIO()
