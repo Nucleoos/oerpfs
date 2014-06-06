@@ -26,7 +26,7 @@ import os
 import multiprocessing
 from openerp.osv import orm
 from openerp.osv import fields
-from openerp.addons.oerpfs.oerpfs import OerpFSModel, OerpFSCsvImport
+from openerp.addons.oerpfs.oerpfs import OerpFSModel, OerpFSCsvImport, OerpFSDocument
 
 
 class OerpfsMount(orm.TransientModel):
@@ -58,6 +58,8 @@ class OerpfsMount(orm.TransientModel):
                 fuseClass = OerpFSModel
             elif wizard.directory_id.type == 'csv_import':
                 fuseClass = OerpFSCsvImport
+            elif wizard.directory_id.type == 'document':
+                fuseClass = OerpFSDocument
 
             # Mount options
             mount_options = [

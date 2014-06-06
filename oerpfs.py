@@ -31,6 +31,7 @@ from StringIO import StringIO
 from openerp import pooler
 from openerp.osv import orm
 from openerp.osv import fields
+from openerp.addons.document.document import get_node_context
 
 fuse.fuse_python_api = (0, 2)
 
@@ -42,7 +43,7 @@ class OerpFsDirectory(orm.Model):
     _columns = {
         'name': fields.char('Name', size=64, required=True, help='Directory name'),
         'path': fields.char('Path', size=256, required=True, help='Path of this directory'),
-        'type': fields.selection([('attachment', 'Attachment'), ('csv_import', 'CSV Import')], 'Type', required=True, help='Type of mount'),
+        'type': fields.selection([('attachment', 'Attachment'), ('csv_import', 'CSV Import'), ('document', 'Document')], 'Type', required=True, help='Type of mount'),
     }
 
     _defaults = {
@@ -362,5 +363,129 @@ class OerpFSCsvImport(fuse.Fuse):
         cr.commit()
         cr.close()
         return True
+
+
+class OerpFSDocument(fuse.Fuse):
+    """
+    Fuse filesystem for simple OpenERP documents tree access
+    """
+    def __init__(self, uid, dbname, *args, **kwargs):
+        super(OerpFSDocument, self).__init__(*args, **kwargs)
+
+        # Dict used to store files contents
+        self.files = {}
+
+        # Initialize OpenERP specific variables
+        self.uid = uid
+        self.dbname = dbname
+
+    def getattr(self, path):
+        """
+        Return attributes for the specified path :
+            - Search for the model as first part
+            - Search for an existing record as second part
+            - Search for an existing attachment as third part
+            - There cannot be more than 3 parts in the path
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+
+        if path != '/':
+            path = '/' + path
+
+        # Check for node existence
+        node = get_node_context(cr, self.uid, {})
+        node = node.get_uri(cr, path.split('/')[1:])
+        if not node:
+            cr.close()
+            return -ENOENT
+
+        # Default : Declare an unreadable file
+        fakeStat = fuse.Stat()
+        fakeStat.st_mode = stat.S_IFREG | 0000
+        fakeStat.st_nlink = 0
+
+        # Directory
+        if node.our_type == 'collection':
+            fakeStat.st_mode = stat.S_IFDIR | 0600
+            cr.close()
+            return fakeStat
+        # Regular file
+        elif node.our_type == 'file':
+            fakeStat.st_mode = stat.S_IFREG | 0600
+            fakeStat.st_size = node.get_data_len(cr)
+            cr.close()
+            return fakeStat
+
+        cr.close()
+        return fakeStat
+
+    def readdir(self, path, offset):
+        """
+        Return content of a directory :
+            - List models for root path
+            - List records for a model
+            - List attachments for a record
+        We don't have to check for the path, because getattr already returns -ENOENT if the model/record/attachment doesn't exist
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+        yield fuse.Direntry('.')
+        yield fuse.Direntry('..')
+
+        if path != '/':
+            path = '/' + path
+
+        node = get_node_context(cr, self.uid, {})
+        node = node.get_uri(cr, path.split('/')[1:])
+        for child in node.children(cr):
+            yield fuse.Direntry(str(child.displayname))
+
+        cr.close()
+
+    def read(self, path, size, offset):
+        return 0
+
+    def rename(self, old_path, new_path):
+        return 0
+
+    def open(self, path, flags):
+        self.files[path] = StringIO()
+
+    def create(self, path, mode, fi=None):
+        self.files[path] = StringIO()
+        return 0
+
+    def write(self, path, buf, offset):
+        """
+        Write the contents of a new file
+        """
+        if not path in self.files:
+            return -ENOENT
+        self.files[path].write(buf)
+        return len(buf)
+
+    def flush(self, path):
+        return 0
+
+    def truncate(self, path, length):
+        return 0
+
+    def chmod(self, path):
+        return 0
+
+    def chown(self, path):
+        return 0
+
+    def utime(self, path, times=None):
+        return 0
+
+    def release(self, path, fh):
+        # Close StringIO and free memory
+        self.files[path].close()
+        del self.files[path]
+
+    def unlink(self, path):
+        return 0
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
