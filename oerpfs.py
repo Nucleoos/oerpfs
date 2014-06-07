@@ -468,4 +468,55 @@ class OerpFSDocument(OerpFS):
 
         cr.close()
 
+    def create(self, path, mode, fi=None):
+        """
+        Create an empty file
+        """
+        super(OerpFSDocument, self).create(path, mode, fi=fi)
+
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+
+        # Create an empty file
+        parent_node = self._get_node(cr, '/'.join(path.split('/')[:-1]))
+        parent_node.create_child(cr, path.split('/')[-1])
+
+        cr.commit()
+        cr.close()
+
+    def flush(self, path):
+        """
+        Write the contents into OpenERP
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+
+        # FIXME : Don't know why it doesn't work without rebuilding the StringIO object...
+        value = StringIO(self.files[path].getvalue())
+
+        # Write data in the file
+        node = self._get_node(cr, path)
+        node.set_data(cr, value.getvalue())
+
+        # Release variables
+        value.close()
+        del value
+
+        cr.commit()
+        cr.close()
+
+    def unlink(self, path):
+        """
+        Delete a file
+        """
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+
+        # Delete the file
+        node = self._get_node(cr, path)
+        node.rm(cr)
+
+        cr.commit()
+        cr.close()
+
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
