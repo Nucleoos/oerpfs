@@ -22,11 +22,8 @@
 #
 ##############################################################################
 
-import os
-import multiprocessing
 from openerp.osv import orm
 from openerp.osv import fields
-from openerp.addons.oerpfs.oerpfs import OerpFSModel, OerpFSCsvImport, OerpFSDocument
 
 
 class OerpfsMount(orm.TransientModel):
@@ -46,34 +43,9 @@ class OerpfsMount(orm.TransientModel):
         """
         Mount a directory for the choosen user
         """
-        def launch(mount_point):
-            os.setsid()
-            # FIXME : Better manage multi processing
-            os.closerange(3, os.sysconf("SC_OPEN_MAX"))
-            mount_point.main()
-
+        directory_obj = self.pool.get('oerpfs.directory')
         for wizard in self.browse(cr, uid, ids, context=context):
-            fuseClass = None
-            if wizard.directory_id.type == 'attachment':
-                fuseClass = OerpFSModel
-            elif wizard.directory_id.type == 'csv_import':
-                fuseClass = OerpFSCsvImport
-            elif wizard.directory_id.type == 'document':
-                fuseClass = OerpFSDocument
-
-            # Mount options
-            mount_options = [
-                '-o', 'fsname=oerpfs',
-                '-o', 'subtype=openerp.' + str(wizard.directory_id.name),
-            ]
-
-            # Mount the directory using fuse
-            mount_point = fuseClass(wizard.user_id.id, cr.dbname)
-            mount_point.fuse_args.mountpoint = str(wizard.directory_id.path)
-            mount_point.multithreaded = True
-            mount_point.parse(mount_options)
-            mount_process = multiprocessing.Process(target=launch, args=(mount_point,))
-            mount_process.start()
+            directory_obj.mount(cr, wizard.user_id.id, [wizard.directory_id.id], context=context)
 
         return True
 

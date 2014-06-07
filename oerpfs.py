@@ -22,10 +22,12 @@
 #
 ##############################################################################
 
+import os
 import csv
 import stat
 import fuse
 import base64
+import multiprocessing
 from errno import ENOENT
 from StringIO import StringIO
 from openerp import pooler
@@ -50,6 +52,41 @@ class OerpFsDirectory(orm.Model):
         'path': '/srv/openerp/fs/',
         'type': 'attachment',
     }
+
+    def mount(self, cr, uid, ids, context=None):
+        """
+        Mount a directory for the choosen user
+        """
+        def launch(mount_point):
+            os.setsid()
+            # FIXME : Better manage multi processing
+            os.closerange(3, os.sysconf("SC_OPEN_MAX"))
+            mount_point.main()
+
+        for directory in self.browse(cr, uid, ids, context=context):
+            fuseClass = None
+            if directory.type == 'attachment':
+                fuseClass = OerpFSModel
+            elif directory.type == 'csv_import':
+                fuseClass = OerpFSCsvImport
+            elif directory.type == 'document':
+                fuseClass = OerpFSDocument
+
+            # Mount options
+            mount_options = [
+                '-o', 'fsname=oerpfs',
+                '-o', 'subtype=openerp.' + str(directory.name),
+            ]
+
+            # Mount the directory using fuse
+            mount_point = fuseClass(uid, cr.dbname)
+            mount_point.fuse_args.mountpoint = str(directory.path)
+            mount_point.multithreaded = True
+            mount_point.parse(mount_options)
+            mount_process = multiprocessing.Process(target=launch, args=(mount_point,))
+            mount_process.start()
+
+        return True
 
 
 class OerpFS(fuse.Fuse):
