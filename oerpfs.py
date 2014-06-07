@@ -382,8 +382,8 @@ class OerpFSDocument(OerpFS):
         """
         Return a node object corresponding to the supplied path
         """
-        if path != '/':
-            path = '/' + path
+        if path == '/':
+            path = ''
 
         # Retrieve the node instance
         node = get_node_context(cr, self.uid, {})
