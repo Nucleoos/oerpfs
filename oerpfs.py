@@ -406,7 +406,7 @@ class OerpFSDocument(OerpFS):
         fakeStat.st_nlink = 0
 
         # Directory
-        if node.our_type == 'collection':
+        if node.our_type in ('database', 'collection'):
             fakeStat.st_mode = stat.S_IFDIR | 0600
             cr.close()
             return fakeStat
