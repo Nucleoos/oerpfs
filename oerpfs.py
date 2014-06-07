@@ -227,7 +227,7 @@ class OerpFSModel(OerpFS):
         new_paths = new_path.split('/')[1:]
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', old_paths[0]), ('res_id', '=', int(old_paths[1])), ('name', '=', old_paths[2])])
-        attachment_obj.write(cr, self.uid, attachment_ids, {'res_model': new_paths[0], 'res_id': new_paths[1], 'name': new_paths[2]})
+        attachment_obj.write(cr, self.uid, attachment_ids, {'res_model': new_paths[0], 'res_id': new_paths[1], 'name': new_paths[2], 'datas_fname': new_paths[2]})
 
         cr.commit()
         cr.close()
@@ -280,7 +280,7 @@ class OerpFSModel(OerpFS):
         paths = path.split('/')[1:]
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
-        attachment_obj.write(cr, self.uid, attachment_ids, {'type': 'binary', 'datas': base64.b64encode(value.getvalue()), 'res_model': paths[0], 'res_id': paths[1], 'name': paths[2]})
+        attachment_obj.write(cr, self.uid, attachment_ids, {'type': 'binary', 'datas': base64.b64encode(value.getvalue()), 'res_model': paths[0], 'res_id': paths[1], 'name': paths[2], 'datas_fname': paths[2]})
 
         # Release variables
         value.close()
