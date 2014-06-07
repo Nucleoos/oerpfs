@@ -52,12 +52,12 @@ class OerpFsDirectory(orm.Model):
     }
 
 
-class OerpFSModel(fuse.Fuse):
+class OerpFS(fuse.Fuse):
     """
-    Fuse filesystem for simple OpenERP filestore access
+    Base for all OerpFS classes
     """
     def __init__(self, uid, dbname, *args, **kwargs):
-        super(OerpFSModel, self).__init__(*args, **kwargs)
+        super(OerpFS, self).__init__(*args, **kwargs)
 
         # Dict used to store files contents
         self.files = {}
@@ -65,6 +65,59 @@ class OerpFSModel(fuse.Fuse):
         # Initialize OpenERP specific variables
         self.uid = uid
         self.dbname = dbname
+
+    def open(self, path, flags):
+        """
+        Create a StringIO instance in self.files[path]
+        """
+        self.files[path] = StringIO()
+
+    def read(self, path, size, offset):
+        """
+        Return the asked part of the file's contents
+        """
+        if not path in self.files:
+            self.open(path, None)
+        self.files[path].seek(offset)
+        return self.files[path].read(n=size)
+
+    def create(self, path, mode, fi=None):
+        """
+        Create an empty StringIO instance in self.files[path]
+        Inherited classes may have to create an empty file
+        """
+        self.files[path] = StringIO()
+
+    def write(self, path, buf, offset):
+        """
+        Write the contents in the self.files[path] StringIO instance
+        """
+        if not path in self.files:
+            return -ENOENT
+        self.files[path].seek(offset)
+        self.files[path].write(buf)
+        return len(buf)
+
+    def truncate(self, path, length):
+        """
+        Truncate the file's contents
+        """
+        self.files[path].truncate(size=length)
+
+    def release(self, path, fh):
+        """
+        Close the StringIO instance and free memory
+        """
+        self.files[path].close()
+        del self.files[path]
+
+
+class OerpFSModel(OerpFS):
+    """
+    Fuse filesystem for simple OpenERP filestore access
+    """
+    def __init__(self, uid, dbname, *args, **kwargs):
+        super(OerpFSModel, self).__init__(uid, dbname, *args, **kwargs)
 
     def getattr(self, path):
         """
@@ -163,57 +216,56 @@ class OerpFSModel(fuse.Fuse):
 
         cr.close()
 
-    def read(self, path, size, offset):
-        """
-        Return the specified slide of a file
-        Note : Only the beginning of the name is required (the ID of the attachment), we can put anything after the first '-', it will be ignored
-        """
-        db, pool = pooler.get_db_and_pool(self.dbname)
-        cr = db.cursor()
-        paths = path.split('/')[1:]
-        # Read files by slides
-        attachment_obj = pool.get('ir.attachment')
-        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
-        attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
-        cr.close()
-        return base64.b64decode(attachment_data[0]['datas'])[offset:offset + size]
-
     def rename(self, old_path, new_path):
         """
         Rename a file, eventually moving it from a model to another one, if the parent directories have changed
         """
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
+
         old_paths = old_path.split('/')[1:]
         new_paths = new_path.split('/')[1:]
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', old_paths[0]), ('res_id', '=', int(old_paths[1])), ('name', '=', old_paths[2])])
         attachment_obj.write(cr, self.uid, attachment_ids, {'res_model': new_paths[0], 'res_id': new_paths[1], 'name': new_paths[2]})
+
         cr.commit()
         cr.close()
 
     def open(self, path, flags):
-        self.files[path] = StringIO()
-
-    def create(self, path, mode, fi=None):
+        """
+        Create a StringIO instance in self.files[path], initialized with the file's contents
+        """
+        super(OerpFSModel, self).open(path, flags)
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
-        self.files[path] = StringIO()
+
+        # Read the file's contents
+        paths = path.split('/')[1:]
+        attachment_obj = pool.get('ir.attachment')
+        attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
+        attachment_data = attachment_obj.read(cr, self.uid, attachment_ids, ['datas'])
+        if attachment_data[0]['datas']:
+            self.files[path] = StringIO(base64.b64decode(attachment_data[0]['datas']))
+
+        cr.close()
+
+    def create(self, path, mode, fi=None):
+        """
+        Create an empty file
+        """
+        super(OerpFSModel, self).create(path, mode, fi=fi)
+
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
+
+        # Create an empty ir.attachment file
         paths = path.split('/')[1:]
         attachment_obj = pool.get('ir.attachment')
         attachment_obj.create(cr, self.uid, {'type': 'binary', 'res_model': paths[0], 'res_id': paths[1], 'name': paths[2]})
+
         cr.commit()
         cr.close()
-        return 0
-
-    def write(self, path, buf, offset):
-        """
-        Write the contents of a new file
-        """
-        if not path in self.files:
-            return -ENOENT
-        self.files[path].write(buf)
-        return len(buf)
 
     def flush(self, path):
         """
@@ -221,6 +273,7 @@ class OerpFSModel(fuse.Fuse):
         """
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
+
         # FIXME : Don't know why it doesn't work without rebuilding the StringIO object...
         value = StringIO(self.files[path].getvalue())
 
@@ -228,27 +281,13 @@ class OerpFSModel(fuse.Fuse):
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
         attachment_obj.write(cr, self.uid, attachment_ids, {'type': 'binary', 'datas': base64.b64encode(value.getvalue()), 'res_model': paths[0], 'res_id': paths[1], 'name': paths[2]})
+
+        # Release variables
         value.close()
         del value
+
         cr.commit()
         cr.close()
-
-    def truncate(self, path, length):
-        return 0
-
-    def chmod(self, path):
-        return 0
-
-    def chown(self, path):
-        return 0
-
-    def utime(self, path, times=None):
-        return 0
-
-    def release(self, path, fh):
-        # Close StringIO and free memory
-        self.files[path].close()
-        del self.files[path]
 
     def unlink(self, path):
         """
@@ -256,27 +295,23 @@ class OerpFSModel(fuse.Fuse):
         """
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
+
+        # Delete the ir.attachment
         paths = path.split('/')[1:]
         attachment_obj = pool.get('ir.attachment')
         attachment_ids = attachment_obj.search(cr, self.uid, [('res_model', '=', paths[0]), ('res_id', '=', int(paths[1])), ('name', '=', paths[2])])
         attachment_obj.unlink(cr, self.uid, attachment_ids)
+
         cr.commit()
         cr.close()
 
 
-class OerpFSCsvImport(fuse.Fuse):
+class OerpFSCsvImport(OerpFS):
     """
     Automatic CSV import to OpenERP on file copy
     """
     def __init__(self, uid, dbname, *args, **kwargs):
-        super(OerpFSCsvImport, self).__init__(*args, **kwargs)
-
-        # Dict used to store files contents
-        self.files = {}
-
-        # Initialize OpenERP specific variables
-        self.uid = uid
-        self.dbname = dbname
+        super(OerpFSCsvImport, self).__init__(uid, dbname, *args, **kwargs)
 
     def getattr(self, path):
         """
@@ -306,37 +341,6 @@ class OerpFSCsvImport(fuse.Fuse):
         for path in self.files:
             yield(fuse.Direntry(path))
 
-    def open(self, path, flags):
-        return 0
-
-    def create(self, path, mode, fi=None):
-        self.files[path] = StringIO()
-        return 0
-
-    def write(self, path, buf, offset):
-        """
-        Write the contents of a CSV file : store it in a variable
-        """
-        if not path in self.files:
-            return -ENOENT
-        self.files[path].write(buf)
-        return len(buf)
-
-    def flush(self, path):
-        return 0
-
-    def truncate(self, path, length):
-        return 0
-
-    def chmod(self, path):
-        return 0
-
-    def chown(self, path):
-        return 0
-
-    def utime(self, path, times=None):
-        return 0
-
     def release(self, path, fh):
         """
         Writing of the file is finished, import the contents into OpenERP
@@ -360,24 +364,19 @@ class OerpFSCsvImport(fuse.Fuse):
         del self.files[path]
         value.close()
         del value
+
         cr.commit()
         cr.close()
-        return True
+
+        super(OerpFSCsvImport, self).flush(path)
 
 
-class OerpFSDocument(fuse.Fuse):
+class OerpFSDocument(OerpFS):
     """
     Fuse filesystem for simple OpenERP documents tree access
     """
     def __init__(self, uid, dbname, *args, **kwargs):
-        super(OerpFSDocument, self).__init__(*args, **kwargs)
-
-        # Dict used to store files contents
-        self.files = {}
-
-        # Initialize OpenERP specific variables
-        self.uid = uid
-        self.dbname = dbname
+        super(OerpFSDocument, self).__init__(uid, dbname, *args, **kwargs)
 
     def _get_node(self, cr, path):
         """
@@ -386,17 +385,13 @@ class OerpFSDocument(fuse.Fuse):
         if path != '/':
             path = '/' + path
 
-        # Check for node existence
+        # Retrieve the node instance
         node = get_node_context(cr, self.uid, {})
         return node.get_uri(cr, path.split('/')[1:])
 
     def getattr(self, path):
         """
-        Return attributes for the specified path :
-            - Search for the model as first part
-            - Search for an existing record as second part
-            - Search for an existing attachment as third part
-            - There cannot be more than 3 parts in the path
+        Return attributes for the specified path
         """
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
@@ -427,10 +422,7 @@ class OerpFSDocument(fuse.Fuse):
 
     def readdir(self, path, offset):
         """
-        Return content of a directory :
-            - List models for root path
-            - List records for a model
-            - List attachments for a record
+        Return content of a directory
         We don't have to check for the path, because getattr already returns -ENOENT if the model/record/attachment doesn't exist
         """
         db, pool = pooler.get_db_and_pool(self.dbname)
@@ -444,62 +436,36 @@ class OerpFSDocument(fuse.Fuse):
 
         cr.close()
 
-    def read(self, path, size, offset):
-        db, pool = pooler.get_db_and_pool(self.dbname)
-        cr = db.cursor()
-
-        node = self._get_node(cr, path)
-        contents = node.get_data(cr)
-        cr.close()
-        return contents[offset:offset + size]
-
     def rename(self, old_path, new_path):
+        """
+        Change the file's path and name
+        """
         db, pool = pooler.get_db_and_pool(self.dbname)
         cr = db.cursor()
 
+        # Retrieve the old dir's node instance
         node = self._get_node(cr, old_path)
+        # Retrieve the new dir's node instance
         new_dir_node = self._get_node(cr, '/'.join(new_path.split('/')[:-1]))
+        # Change the file's name and path
         node.move_to(cr, new_dir_node, new_name=new_path.split('/')[-1])
+
         cr.commit()
         cr.close()
 
     def open(self, path, flags):
-        self.files[path] = StringIO()
-
-    def create(self, path, mode, fi=None):
-        self.files[path] = StringIO()
-        return 0
-
-    def write(self, path, buf, offset):
         """
-        Write the contents of a new file
+        Create a StringIO instance in self.files[path], initialized with the file's contents
         """
-        if not path in self.files:
-            return -ENOENT
-        self.files[path].write(buf)
-        return len(buf)
+        super(OerpFSDocument, self).open(path, flags)
+        db, pool = pooler.get_db_and_pool(self.dbname)
+        cr = db.cursor()
 
-    def flush(self, path):
-        return 0
+        # Retrieve the file's node instance
+        node = self._get_node(cr, path)
+        # Read the file's contents
+        self.files[path] = StringIO(node.get_data(cr))
 
-    def truncate(self, path, length):
-        return 0
-
-    def chmod(self, path):
-        return 0
-
-    def chown(self, path):
-        return 0
-
-    def utime(self, path, times=None):
-        return 0
-
-    def release(self, path, fh):
-        # Close StringIO and free memory
-        self.files[path].close()
-        del self.files[path]
-
-    def unlink(self, path):
-        return 0
+        cr.close()
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
