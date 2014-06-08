@@ -63,6 +63,8 @@ class OerpFsDirectory(orm.Model):
             os.closerange(3, os.sysconf("SC_OPEN_MAX"))
             mount_point.main()
 
+        user = self.pool.get('res.users').browse(cr, uid, uid, context=context)
+
         for directory in self.browse(cr, uid, ids, context=context):
             fuseClass = None
             if directory.type == 'attachment':
@@ -74,7 +76,7 @@ class OerpFsDirectory(orm.Model):
 
             # Mount options
             mount_options = [
-                '-o', 'fsname=oerpfs',
+                '-o', 'fsname=oerpfs/' + str(user.login),
                 '-o', 'subtype=openerp.' + str(directory.name),
             ]
 
